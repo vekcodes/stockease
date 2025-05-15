@@ -84,7 +84,7 @@ const data = {
       items: [
         {
           title: "Stock Screener",
-          url: "#",
+          url: "/stock-screener",
         },
         {
           title: "My Stocks",

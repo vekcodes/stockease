@@ -27,8 +27,9 @@ const MACrossover = () => {
   const [data, setData] = useState(null);
   const [symbols, setSymbols] = useState([]);
   const [selectedSymbol, setSelectedSymbol] = useState("");
-  const [selectedStrategy, setSelectedStrategy] = useState("fast_ma");
+  const [selectedStrategy, setSelectedStrategy] = useState("golden_cross");
   const [error, setError] = useState(null);
+  const [crossoverSignals, setCrossoverSignals] = useState([]);
 
   // Fetch available stock symbols
   useEffect(() => {
@@ -36,9 +37,11 @@ const MACrossover = () => {
       try {
         const response = await API.get('/stock_scraper/symbols/');
         if (response.data && response.data.symbols) {
-          setSymbols(response.data.symbols);
-          if (response.data.symbols.length > 0) {
-            setSelectedSymbol(response.data.symbols[0]);
+          // Sort symbols alphabetically
+          const sortedSymbols = [...response.data.symbols].sort();
+          setSymbols(sortedSymbols);
+          if (sortedSymbols.length > 0) {
+            setSelectedSymbol(sortedSymbols[0]);
           }
         }
       } catch (error) {
@@ -58,6 +61,7 @@ const MACrossover = () => {
         const response = await API.get(`/stock_scraper/ma_crossover/${selectedSymbol}/`);
         if (response.data && response.data.data) {
           setData(response.data);
+          processCrossoverSignals(response.data.data);
           setError(null);
         } else {
           setError("Invalid data format received from API");
@@ -70,15 +74,60 @@ const MACrossover = () => {
     getData();
   }, [selectedSymbol]);
 
+  const processCrossoverSignals = (data) => {
+    const signals = [];
+    const strategies = {
+      golden_cross: { name: 'Golden Cross (50/200 MA)', short: 'MA50', long: 'MA200' },
+      ema_short: { name: 'Short-term EMA (9/21)', short: 'EMA9', long: 'EMA21' },
+      ema_medium: { name: 'Medium-term EMA (20/50)', short: 'EMA20', long: 'EMA50' }
+    };
+
+    Object.entries(strategies).forEach(([key, strategy]) => {
+      let lastSignal = 0;
+      let signalStart = null;
+      let signalPrice = null;
+
+      data.forEach((item, index) => {
+        const currentSignal = item[`${key}_signal`];
+        
+        if (currentSignal !== 0 && currentSignal !== lastSignal) {
+          if (signalStart) {
+            signals.push({
+              strategy: strategy.name,
+              type: lastSignal === 1 ? 'BUY' : 'SELL',
+              start: signalStart,
+              end: item.date,
+              crossoverPrice: signalPrice
+            });
+          }
+          signalStart = item.date;
+          signalPrice = item.close;
+          lastSignal = currentSignal;
+        }
+      });
+
+      // Add the last signal if it's still active
+      if (signalStart && lastSignal !== 0) {
+        signals.push({
+          strategy: strategy.name,
+          type: lastSignal === 1 ? 'BUY' : 'SELL',
+          start: signalStart,
+          end: 'Present',
+          crossoverPrice: signalPrice
+        });
+      }
+    });
+
+    setCrossoverSignals(signals);
+  };
+
   const getStrategyColors = (strategy) => {
     const colors = {
-      fast_ma: { short: 'rgb(255, 99, 132)', long: 'rgb(54, 162, 235)' },
-      swing_ema: { short: 'rgb(75, 192, 192)', long: 'rgb(153, 102, 255)' },
-      balanced_ma: { short: 'rgb(255, 159, 64)', long: 'rgb(201, 203, 207)' },
-      slow_ma: { short: 'rgb(255, 205, 86)', long: 'rgb(54, 162, 235)' },
-      fib_ema: { short: 'rgb(75, 192, 192)', long: 'rgb(255, 99, 132)' }
+      golden_cross: { short: 'rgb(255, 99, 132)', long: 'rgb(54, 162, 235)' },    // 50 MA and 200 MA
+      ema_short: { short: 'rgb(75, 192, 192)', long: 'rgb(153, 102, 255)' },      // 9 EMA and 21 EMA
+      ema_medium: { short: 'rgb(255, 159, 64)', long: 'rgb(201, 203, 207)' }      // 20 EMA and 50 EMA
     };
-    return colors[strategy] || colors.fast_ma;
+    return colors[strategy] || colors.golden_cross;
   };
 
   const getChartData = () => {
@@ -88,7 +137,7 @@ const MACrossover = () => {
     const colors = getStrategyColors(selectedStrategy);
 
     return {
-      labels: data.data.map(item => new Date(item.date).toLocaleDateString()),
+      labels: data.data.map(item => item.date),
       datasets: [
         {
           label: 'Close Price',
@@ -110,14 +159,6 @@ const MACrossover = () => {
           borderColor: colors.long,
           backgroundColor: 'rgba(54, 162, 235, 0.5)',
           tension: 0.1,
-        },
-        {
-          label: 'Volatility',
-          data: data.data.map(item => item.Volatility),
-          borderColor: 'rgb(153, 102, 255)',
-          backgroundColor: 'rgba(153, 102, 255, 0.5)',
-          tension: 0.1,
-          yAxisID: 'volatility',
         }
       ],
     };
@@ -134,20 +175,49 @@ const MACrossover = () => {
         display: true,
         text: data ? `${data.metadata.strategies[selectedStrategy].name} for ${selectedSymbol}` : '',
       },
+      tooltip: {
+        mode: 'index',
+        intersect: false,
+        callbacks: {
+          label: function(context) {
+            let label = context.dataset.label || '';
+            if (label) {
+              label += ': ';
+            }
+            if (context.parsed.y !== null) {
+              label += context.parsed.y.toFixed(2);
+            }
+            return label;
+          }
+        }
+      }
     },
     scales: {
+      x: {
+        title: {
+          display: true,
+          text: 'Date'
+        }
+      },
       y: {
         beginAtZero: false,
         position: 'left',
-      },
-      volatility: {
-        beginAtZero: true,
-        position: 'right',
-        grid: {
-          drawOnChartArea: false,
+        title: {
+          display: true,
+          text: 'Price'
         },
-      },
+        ticks: {
+          callback: function(value) {
+            return value.toFixed(2);
+          }
+        }
+      }
     },
+    interaction: {
+      mode: 'nearest',
+      axis: 'x',
+      intersect: false
+    }
   };
 
   // Get the latest signal
@@ -161,36 +231,11 @@ const MACrossover = () => {
       close: latestData.close,
       short_ma: latestData[strategy.short_ma],
       long_ma: latestData[strategy.long_ma],
-      volatility: latestData.Volatility,
       strategy: strategy
     };
   };
 
   const latestSignal = getLatestSignal();
-
-  const calculateSignals = (data) => {
-    if (!data || data.length === 0) return null;
-    
-    const lookbackPeriod = 5; // Look at last 5 days for signals
-    const signals = {};
-    
-    strategies.forEach(strategy => {
-      const signalKey = `${strategy.key}_signal`;
-      // Get the most recent non-zero signal within lookback period
-      const recentSignals = data.slice(-lookbackPeriod).map(row => row[signalKey]);
-      const lastSignal = recentSignals.reverse().find(signal => signal !== 0);
-      
-      if (lastSignal === 1) {
-        signals[strategy.key] = 'buy';
-      } else if (lastSignal === -1) {
-        signals[strategy.key] = 'sell';
-      } else {
-        signals[strategy.key] = 'neutral';
-      }
-    });
-    
-    return signals;
-  };
 
   if (error) {
     return (
@@ -204,55 +249,52 @@ const MACrossover = () => {
   }
 
   return (
-    <div className="p-4 max-w-7xl mx-auto">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        {/* Symbol Selection */}
-        <div className="max-w-xs">
-          <label htmlFor="symbol" className="block text-sm font-medium text-gray-700">
-            Stock Symbol
-          </label>
-          <select
-            id="symbol"
-            value={selectedSymbol}
-            onChange={(e) => setSelectedSymbol(e.target.value)}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-          >
-            {symbols.map((symbol) => (
-              <option key={symbol} value={symbol}>
-                {symbol}
-              </option>
-            ))}
-          </select>
-        </div>
+    <div className="container mx-auto px-4 py-8">
+      <div className="mb-6">
+        <label htmlFor="symbol" className="block text-sm font-medium text-gray-700 mb-2">
+          Select Stock Symbol
+        </label>
+        <select
+          id="symbol"
+          value={selectedSymbol}
+          onChange={(e) => setSelectedSymbol(e.target.value)}
+          className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-2 border-green-500 focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm rounded-md"
+        >
+          {symbols.map((symbol) => (
+            <option key={symbol} value={symbol}>
+              {symbol}
+            </option>
+          ))}
+        </select>
+      </div>
 
-        {/* Strategy Selection */}
-        <div className="max-w-xs">
-          <label htmlFor="strategy" className="block text-sm font-medium text-gray-700">
-            Strategy
-          </label>
-          <select
-            id="strategy"
-            value={selectedStrategy}
-            onChange={(e) => setSelectedStrategy(e.target.value)}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-          >
-            {data && Object.entries(data.metadata.strategies).map(([key, strategy]) => (
-              <option key={key} value={key}>
-                {strategy.name}
-              </option>
-            ))}
-          </select>
-        </div>
+      {/* Strategy Selection */}
+      <div className="w-full">
+        <label htmlFor="strategy" className="block text-sm font-medium text-gray-700 mb-1">
+          Strategy
+        </label>
+        <select
+          id="strategy"
+          value={selectedStrategy}
+          onChange={(e) => setSelectedStrategy(e.target.value)}
+          className="w-full rounded-md border-2 border-green-500 focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+        >
+          {data && Object.entries(data.metadata.strategies).map(([key, strategy]) => (
+            <option key={key} value={key}>
+              {strategy.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Signal Card */}
       {latestSignal && (
-        <div className="mb-4 p-4 bg-white rounded-lg shadow">
-          <h3 className="text-lg font-semibold mb-2">Latest Signal ({latestSignal.date})</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        <div className="bg-white rounded-lg shadow-md p-4 mb-6">
+          <h3 className="text-lg font-semibold mb-3">Latest Signal ({latestSignal.date})</h3>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div>
               <p className="text-sm text-gray-600">Close Price</p>
-              <p className="text-lg font-medium">{latestSignal.close}</p>
+              <p className="text-lg font-medium">{latestSignal.close.toFixed(2)}</p>
             </div>
             <div>
               <p className="text-sm text-gray-600">Signal</p>
@@ -267,24 +309,16 @@ const MACrossover = () => {
               </p>
             </div>
             <div>
-              <p className="text-sm text-gray-600">Volatility</p>
-              <p className="text-lg font-medium">{latestSignal.volatility.toFixed(2)}</p>
-            </div>
-            <div>
               <p className="text-sm text-gray-600">Strategy Type</p>
-              <p className="text-lg font-medium">{latestSignal.strategy.type} ({latestSignal.strategy.speed})</p>
+              <p className="text-lg font-medium">{latestSignal.strategy.type}</p>
             </div>
-          </div>
-          <div className="mt-4">
-            <p className="text-sm text-gray-600">Use Case</p>
-            <p className="text-base">{latestSignal.strategy.use_case}</p>
           </div>
         </div>
       )}
 
       {/* Chart */}
-      <div className="bg-white p-4 rounded-lg shadow mb-4">
-        <div className="h-[400px]">
+      <div className="bg-white rounded-lg shadow-md p-4 mb-6">
+        <div className="h-[400px] md:h-[500px]">
           {getChartData() ? (
             <Line options={chartOptions} data={getChartData()} />
           ) : (
@@ -293,21 +327,63 @@ const MACrossover = () => {
         </div>
       </div>
 
-      {/* Strategy Guide */}
-      <div className="bg-white p-4 rounded-lg shadow">
-        <h3 className="text-lg font-semibold mb-4">Strategy Guide</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {data && Object.entries(data.metadata.strategies).map(([key, strategy]) => (
-            <div key={key} className="p-4 border rounded-lg">
-              <h4 className="font-medium text-lg mb-2">{strategy.name}</h4>
-              <div className="space-y-2">
-                <p><span className="font-medium">Type:</span> {strategy.type}</p>
-                <p><span className="font-medium">Speed:</span> {strategy.speed}</p>
-                <p><span className="font-medium">Use Case:</span> {strategy.use_case}</p>
-                <p><span className="font-medium">Indicators:</span> {strategy.short_ma} / {strategy.long_ma}</p>
-              </div>
-            </div>
-          ))}
+      {/* Crossover Signals Table */}
+      <div className="bg-white rounded-lg shadow-md p-4">
+        <h3 className="text-lg font-semibold mb-4">
+          {data ? `${data.metadata.strategies[selectedStrategy].name} Signals` : 'Crossover Signals'}
+        </h3>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Signal</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Start Date</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">End Date</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price at Crossover</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {crossoverSignals
+                .filter(signal => {
+                  const strategyMap = {
+                    'golden_cross': 'Golden Cross (50/200 MA)',
+                    'ema_short': 'Short-term EMA (9/21)',
+                    'ema_medium': 'Medium-term EMA (20/50)'
+                  };
+                  return signal.strategy === strategyMap[selectedStrategy];
+                })
+                .map((signal, index) => {
+                  const startDate = new Date(signal.start);
+                  const endDate = signal.end === 'Present' ? new Date() : new Date(signal.end);
+                  const duration = Math.round((endDate - startDate) / (1000 * 60 * 60 * 24));
+                  
+                  return (
+                    <tr key={index}>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm">
+                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                          signal.type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                        }`}>
+                          {signal.type}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                        {new Date(signal.start).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                        {signal.end === 'Present' ? 'Present' : new Date(signal.end).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                        {signal.crossoverPrice ? signal.crossoverPrice.toFixed(2) : '-'}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                        {duration} days
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

@@ -1,11 +1,17 @@
 # views.py
 from django.http import JsonResponse
-from stock_scraper.models import StockOHLC
+from stock_scraper.models import StockOHLC, Investment
 import pandas as pd
 import numpy as np
+from django.shortcuts import render
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from django.db.models import Max
+from datetime import datetime
 
 def get_stock_symbols(request):
-    symbols = StockOHLC.objects.values_list('symbol', flat=True).distinct()
+    # Get unique symbols from StockOHLC
+    symbols = StockOHLC.objects.values_list('symbol', flat=True).distinct().order_by('symbol')
     return JsonResponse({"symbols": list(symbols)}, safe=False)
 
 def calculate_rsi(prices, period=14):
@@ -64,17 +70,6 @@ def calculate_ema(prices, window):
     
     return ema
 
-def calculate_volatility(prices, window=20):
-    """
-    Calculate price volatility using standard deviation
-    """
-    volatility = np.zeros_like(prices)
-    for i in range(len(prices)):
-        if i < window - 1:
-            volatility[i] = np.nan
-        else:
-            volatility[i] = np.std(prices[i-window+1:i+1])
-    return volatility
 
 def golden_cross_momentum(request, symbol):
     # Step 1: Query stock data from the database for the given symbol
@@ -152,6 +147,7 @@ def golden_cross_momentum(request, symbol):
 
 def ma_crossover_strategy(request, symbol):
     # Step 1: Query stock data from the database for the given symbol
+    # Get at least 500 days of data to ensure we have enough for MA calculations
     ohlc_queryset = StockOHLC.objects.filter(symbol=symbol).order_by('date')
 
     # Step 2: Convert queryset to DataFrame
@@ -168,62 +164,34 @@ def ma_crossover_strategy(request, symbol):
     close_prices = df['close'].values
     
     # Simple Moving Averages
-    df['MA5'] = calculate_ma(close_prices, 5)
-    df['MA10'] = calculate_ma(close_prices, 10)
-    df['MA20'] = calculate_ma(close_prices, 20)
     df['MA50'] = calculate_ma(close_prices, 50)
     df['MA200'] = calculate_ma(close_prices, 200)
     
     # Exponential Moving Averages
     df['EMA9'] = calculate_ema(close_prices, 9)
-    df['EMA13'] = calculate_ema(close_prices, 13)
     df['EMA21'] = calculate_ema(close_prices, 21)
-    df['EMA34'] = calculate_ema(close_prices, 34)
-    
-    # Calculate volatility
-    df['Volatility'] = calculate_volatility(close_prices)
+    df['EMA20'] = calculate_ema(close_prices, 20)
+    df['EMA50'] = calculate_ema(close_prices, 50)
 
     # Step 4: Generate signals for each strategy
     strategies = {
-        'fast_ma': {
-            'name': '5/10 MA Crossover',
-            'type': 'Fast',
-            'speed': 'Very fast',
-            'use_case': 'Scalping-style swing trades',
-            'short_ma': 'MA5',
-            'long_ma': 'MA10'
+        'golden_cross': {
+            'name': 'Golden Cross (50/200 MA)',
+            'type': 'Long-term Trend',
+            'short_ma': 'MA50',
+            'long_ma': 'MA200'
         },
-        'swing_ema': {
-            'name': '9/21 EMA Crossover',
-            'type': 'Medium',
-            'speed': 'Fast',
-            'use_case': 'Classic swing combo',
+        'ema_short': {
+            'name': 'Short-term EMA (9/21)',
+            'type': 'Short-term Trend',
             'short_ma': 'EMA9',
             'long_ma': 'EMA21'
         },
-        'balanced_ma': {
-            'name': '10/20 MA Crossover',
-            'type': 'Medium',
-            'speed': 'Balanced',
-            'use_case': 'Safer swing entries',
-            'short_ma': 'MA10',
-            'long_ma': 'MA20'
-        },
-        'slow_ma': {
-            'name': '20/50 MA Crossover',
-            'type': 'Slow',
-            'speed': 'Stable',
-            'use_case': 'Longer swing confirmation',
-            'short_ma': 'MA20',
-            'long_ma': 'MA50'
-        },
-        'fib_ema': {
-            'name': '13/34 EMA Crossover',
-            'type': 'Medium',
-            'speed': 'Trendy',
-            'use_case': 'Fibonacci-based traders',
-            'short_ma': 'EMA13',
-            'long_ma': 'EMA34'
+        'ema_medium': {
+            'name': 'Medium-term EMA (20/50)',
+            'type': 'Medium-term Trend',
+            'short_ma': 'EMA20',
+            'long_ma': 'EMA50'
         }
     }
 
@@ -233,38 +201,143 @@ def ma_crossover_strategy(request, symbol):
         short_ma = strategy['short_ma']
         long_ma = strategy['long_ma']
         
-        # Generate signals based on crossover
+        # Generate signals based on crossover and price movement
         for i in range(1, len(df)):
             if pd.notna(df[short_ma].iloc[i]) and pd.notna(df[long_ma].iloc[i]):
-                # Buy signal: short MA crosses above long MA
-                if (df[short_ma].iloc[i-1] <= df[long_ma].iloc[i-1]) and (df[short_ma].iloc[i] > df[long_ma].iloc[i]):
+                # Calculate price change
+                price_change = df['close'].iloc[i] - df['close'].iloc[i-1]
+                
+                # Buy signal: short MA crosses above long MA AND price is moving up
+                if (df[short_ma].iloc[i-1] <= df[long_ma].iloc[i-1]) and \
+                   (df[short_ma].iloc[i] > df[long_ma].iloc[i]) and \
+                   (price_change > 0):
                     df[f'{strategy_key}_signal'].iloc[i] = 1
-                # Sell signal: short MA crosses below long MA
-                elif (df[short_ma].iloc[i-1] >= df[long_ma].iloc[i-1]) and (df[short_ma].iloc[i] < df[long_ma].iloc[i]):
+                
+                # Sell signal: short MA crosses below long MA AND price is moving down
+                elif (df[short_ma].iloc[i-1] >= df[long_ma].iloc[i-1]) and \
+                     (df[short_ma].iloc[i] < df[long_ma].iloc[i]) and \
+                     (price_change < 0):
                     df[f'{strategy_key}_signal'].iloc[i] = -1
 
-    # Step 5: Prepare result - return last 200 days of data for better visualization
-    result = df.dropna().tail(200).reset_index()
+    # Step 5: Prepare result - return more historical data for better signal analysis
+    # For Golden Cross (200 MA), we need at least 200 days of data
+    # For other strategies, we'll return 300 days to ensure enough signals
+    result = df.dropna().tail(300).reset_index()
     
     # Format the data for visualization
     data = result.to_dict(orient='records')
     
     # Add metadata about the strategies
     metadata = {
-        "strategies": strategies,
-        "indicators": {
-            "Volatility": {
-                "name": "Price Volatility",
-                "description": "20-day standard deviation of price movements",
-                "interpretation": "Higher values indicate more volatile price action"
-            }
-        }
+        "strategies": strategies
     }
 
     return JsonResponse({
         "data": data,
         "metadata": metadata
     }, safe=False)
+
+def calculate_volatility(symbol, current_date, lookback_days=30):
+    """
+    Calculate volatility using standard deviation of returns
+    """
+    try:
+        # Get historical data for the lookback period
+        historical_data = StockOHLC.objects.filter(
+            symbol=symbol,
+            date__lte=current_date
+        ).order_by('-date')[:lookback_days]
+        
+        if len(historical_data) < 2:
+            return None
+            
+        # Convert to list and reverse to get chronological order
+        prices = [float(data.close) for data in historical_data]
+        prices.reverse()
+        
+        # Calculate daily returns using log returns
+        returns = []
+        for i in range(1, len(prices)):
+            if prices[i-1] > 0:  # Avoid division by zero
+                log_return = np.log(prices[i] / prices[i-1])
+                returns.append(log_return)
+        
+        if not returns:
+            return None
+            
+        # Calculate standard deviation of returns
+        returns_array = np.array(returns)
+        volatility = np.std(returns_array, ddof=1)  # ddof=1 for sample standard deviation
+        
+        # Annualize the volatility (multiply by sqrt of trading days)
+        annualized_volatility = volatility * np.sqrt(252)
+        
+        # Convert to percentage
+        volatility_percentage = annualized_volatility * 100
+        
+        return volatility_percentage
+    except Exception as e:
+        print(f"Error calculating volatility for {symbol}: {str(e)}")
+        return None
+
+def get_stocks_data(request):
+    try:
+        print("Starting get_stocks_data function")  # Debug log
+        
+        # Get the latest date for each symbol from StockOHLC
+        latest_dates = StockOHLC.objects.values('symbol').annotate(
+            latest_date=Max('date')
+        ).values_list('symbol', 'latest_date')
+        
+        # Get the latest OHLC data for each symbol using a more precise query
+        latest_stocks = []
+        for symbol, latest_date in latest_dates:
+            stock = StockOHLC.objects.filter(
+                symbol=symbol,
+                date=latest_date
+            ).first()
+            if stock:
+                latest_stocks.append(stock)
+        
+        print(f"Found {len(latest_stocks)} stocks")  # Debug log
+        
+        stocks_data = []
+        for stock in latest_stocks:
+            try:
+                # Get the previous day's data for calculating change
+                previous_day = StockOHLC.objects.filter(
+                    symbol=stock.symbol,
+                    date__lt=stock.date
+                ).order_by('-date').first()
+                
+                # Calculate volatility
+                volatility = calculate_volatility(stock.symbol, stock.date)
+                
+                stock_data = {
+                    'symbol': stock.symbol,
+                    'close': float(stock.close) if stock.close else None,
+                    'previous_close': float(previous_day.close) if previous_day else None,
+                    'volume': stock.volume,
+                    'volatility': volatility,
+                    'date': stock.date.strftime('%Y-%m-%d') if stock.date else None
+                }
+                stocks_data.append(stock_data)
+            except Exception as e:
+                print(f"Error processing stock {stock.symbol}: {str(e)}")  # Debug log
+                continue
+        
+        print(f"Successfully processed {len(stocks_data)} stocks")  # Debug log
+        return JsonResponse({
+            'stocks': stocks_data,
+            'count': len(stocks_data)
+        })
+    except Exception as e:
+        import traceback
+        print(f"Error in get_stocks_data: {str(e)}")  # Debug log
+        print(f"Traceback: {traceback.format_exc()}")  # Debug log
+        return JsonResponse({'error': str(e)}, status=500)
+
+
 
 
 
