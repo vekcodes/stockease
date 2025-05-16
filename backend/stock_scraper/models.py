@@ -19,9 +19,10 @@ class StockOHLC(models.Model):
         return f"{self.symbol} - {self.date}"
 
 class Investment(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='investments')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='investments', null=True)
     stock = models.ForeignKey(StockOHLC, on_delete=models.CASCADE, related_name='investments')
     buy_price = models.FloatField()
+    quantity = models.IntegerField(default=1)
     buy_date = models.DateField()
     sell_price = models.FloatField(null=True, blank=True)
     sell_date = models.DateField(null=True, blank=True)
@@ -37,5 +38,5 @@ class Investment(models.Model):
 
     def calculate_pl(self):
         if self.sell_price and self.buy_price:
-            self.total_pl = (self.sell_price - self.buy_price)
+            self.total_pl = (self.sell_price - self.buy_price) * self.quantity
             self.save()

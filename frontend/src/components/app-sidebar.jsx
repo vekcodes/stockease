@@ -88,7 +88,7 @@ const data = {
         },
         {
           title: "My Stocks",
-          url: "#",
+          url: "/my-stocks",
         }
       ],
     },

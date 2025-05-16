@@ -4,10 +4,12 @@ from stock_scraper.models import StockOHLC, Investment
 import pandas as pd
 import numpy as np
 from django.shortcuts import render
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from django.db.models import Max
 from datetime import datetime
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
 
 def get_stock_symbols(request):
     # Get unique symbols from StockOHLC
@@ -336,6 +338,186 @@ def get_stocks_data(request):
         print(f"Error in get_stocks_data: {str(e)}")  # Debug log
         print(f"Traceback: {traceback.format_exc()}")  # Debug log
         return JsonResponse({'error': str(e)}, status=500)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_investments(request):
+    try:
+        investments = Investment.objects.filter(user=request.user).select_related('stock')
+        investments_data = []
+        
+        for investment in investments:
+            investment_data = {
+                'id': investment.id,
+                'stock': {
+                    'symbol': investment.stock.symbol,
+                },
+                'buy_price': investment.buy_price,
+                'quantity': investment.quantity,
+                'buy_date': investment.buy_date.strftime('%Y-%m-%d') if investment.buy_date else None,
+                'sell_price': investment.sell_price,
+                'sell_date': investment.sell_date.strftime('%Y-%m-%d') if investment.sell_date else None,
+                'total_pl': investment.total_pl
+            }
+            investments_data.append(investment_data)
+        
+        return Response(investments_data)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def add_investment(request):
+    try:
+        print("=== Starting add_investment ===")
+        print(f"Request data: {request.data}")
+        print(f"User: {request.user.id}")
+        
+        # Validate required fields
+        required_fields = ['stock', 'buy_price', 'quantity', 'buy_date']
+        for field in required_fields:
+            if field not in request.data:
+                print(f"Missing required field: {field}")
+                return Response({'error': f'{field} is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Try to get the stock
+        stock_symbol = request.data['stock']
+        print(f"Looking for stock with symbol: {stock_symbol}")
+        
+        try:
+            stock = StockOHLC.objects.filter(symbol=stock_symbol).order_by('-date').first()
+            print(f"Stock query result: {stock}")
+        except Exception as e:
+            print(f"Error querying stock: {str(e)}")
+            return Response({'error': f'Error querying stock: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+        if not stock:
+            print(f"Stock not found: {stock_symbol}")
+            return Response({
+                'error': f'Stock with symbol {stock_symbol} not found. Please ensure the stock exists in the database.'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Validate buy_price is a positive number
+        try:
+            buy_price = float(request.data['buy_price'])
+            print(f"Buy price: {buy_price}")
+            if buy_price <= 0:
+                print(f"Invalid buy price: {buy_price}")
+                return Response({'error': 'Buy price must be greater than 0'}, status=status.HTTP_400_BAD_REQUEST)
+        except (ValueError, TypeError) as e:
+            print(f"Error converting buy price: {str(e)}")
+            return Response({'error': 'Invalid buy price'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate quantity is a positive integer
+        try:
+            quantity = int(request.data.get('quantity', 1))
+            print(f"Quantity: {quantity}")
+            if quantity <= 0:
+                print(f"Invalid quantity: {quantity}")
+                return Response({'error': 'Quantity must be greater than 0'}, status=status.HTTP_400_BAD_REQUEST)
+        except (ValueError, TypeError) as e:
+            print(f"Error converting quantity: {str(e)}")
+            return Response({'error': 'Invalid quantity'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        # Validate buy_date
+        try:
+            buy_date = datetime.strptime(request.data['buy_date'], '%Y-%m-%d')
+            print(f"Buy date: {buy_date}")
+        except Exception as e:
+            print(f"Error with buy date: {str(e)}")
+            return Response({'error': 'Invalid buy date format. Please use YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        # Create the investment
+        try:
+            print("Creating investment...")
+            investment = Investment.objects.create(
+                user=request.user,
+                stock=stock,
+                buy_price=buy_price,
+                quantity=quantity,
+                buy_date=buy_date
+            )
+            print(f"Successfully created investment: {investment.id}")
+        except Exception as e:
+            print(f"Error creating investment: {str(e)}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
+            return Response({'error': f'Error creating investment: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        response_data = {
+            'user_id': request.user.id,
+            'stock': {
+                'symbol': request.data['stock'],
+            },
+            'buy_price': investment.buy_price,
+            'quantity': investment.quantity,
+            'buy_date': investment.buy_date.strftime('%Y-%m-%d') if investment.buy_date else None,
+            'sell_price': None,
+            'sell_date': None,
+            'total_pl': None
+        }
+        print(f"Response data: {response_data}")
+        return Response(response_data)
+        
+    except Exception as e:
+        print(f"Unexpected error in add_investment: {str(e)}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def update_investment(request, investment_id):
+    try:
+        # Validate investment_id
+        if not investment_id or investment_id == 'undefined':
+            return Response({'error': 'Invalid investment ID'}, status=status.HTTP_400_BAD_REQUEST)
+
+        investment = Investment.objects.get(id=investment_id, user=request.user)
+        
+        # Convert sell_date string to datetime if provided
+        if 'sell_date' in request.data:
+            try:
+                sell_date = datetime.strptime(request.data['sell_date'], '%Y-%m-%d')
+                investment.sell_date = sell_date
+            except Exception as e:
+                return Response({'error': 'Invalid sell date format. Please use YYYY-MM-DD'}, 
+                              status=status.HTTP_400_BAD_REQUEST)
+
+        # Update sell_price if provided
+        if 'sell_price' in request.data:
+            try:
+                sell_price = float(request.data['sell_price'])
+                if sell_price <= 0:
+                    return Response({'error': 'Sell price must be greater than 0'}, 
+                                  status=status.HTTP_400_BAD_REQUEST)
+                investment.sell_price = sell_price
+            except (ValueError, TypeError):
+                return Response({'error': 'Invalid sell price'}, 
+                              status=status.HTTP_400_BAD_REQUEST)
+            
+        investment.calculate_pl()
+        investment.save()
+        
+        return Response({
+            'id': investment.id,
+            'stock': {
+                'symbol': investment.stock.symbol,
+            },
+            'buy_price': investment.buy_price,
+            'quantity': investment.quantity,
+            'buy_date': investment.buy_date.strftime('%Y-%m-%d') if investment.buy_date else None,
+            'sell_price': investment.sell_price,
+            'sell_date': investment.sell_date.strftime('%Y-%m-%d') if investment.sell_date else None,
+            'total_pl': investment.total_pl
+        })
+    except Investment.DoesNotExist:
+        return Response({'error': 'Investment not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        print(f"Error updating investment: {str(e)}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 
