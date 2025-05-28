@@ -289,7 +289,7 @@ const MyStocks = () => {
                       {investment.quantity}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      ${investment.buy_price.toFixed(2)}
+                      {investment.buy_price.toFixed(2)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       {pl ? (
@@ -303,7 +303,7 @@ const MyStocks = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       {pl ? (
                         <span className={plColor}>
-                          ${pl.value}
+                          {pl.value}
                         </span>
                       ) : (
                         '-'
