@@ -10,6 +10,7 @@ import TheGoldenCrossMomentum from "./pages/TheGoldenCrossMomentum";
 import MACrossover from "./pages/MACrossover";
 import StockScreener from "./pages/StockScreener";
 import MyStocks from "./pages/MyStocks";
+import BuySellNeutral from "./pages/BuySellNeutral";
 
 
 function App() {
@@ -34,6 +35,8 @@ function App() {
           <Route path="/ma-crossover" element={<MACrossover />} />
           <Route path="/stock-screener" element={<StockScreener />} />
           <Route path="my-stocks" element={<MyStocks />} />
+          <Route path="/"></Route>
+          <Route path="/alert" element={<BuySellNeutral/>}/>
         </Route>
         <Route path="/logout" element={<Logout />} />
       </Routes>

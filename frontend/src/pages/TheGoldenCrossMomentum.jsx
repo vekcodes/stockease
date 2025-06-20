@@ -28,6 +28,8 @@ const TheGoldenCrossMomentum = () => {
   const [symbols, setSymbols] = useState([]);
   const [selectedSymbol, setSelectedSymbol] = useState("");
   const [error, setError] = useState(null);
+  const [search, setSearch] = useState("");
+  const [showList, setShowList] = useState(false);
 
   // Fetch available stock symbols
   useEffect(() => {
@@ -246,22 +248,43 @@ const TheGoldenCrossMomentum = () => {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <div className="mb-6">
-        <label htmlFor="symbol" className="block text-sm font-medium text-gray-700 mb-2">
-          Select Stock Symbol
+      <div className="mb-6 relative">
+        <label htmlFor="symbol-search" className="block text-sm font-medium text-gray-700 mb-2">
+          Search Stock Symbol
         </label>
-        <select
-          id="symbol"
-          value={selectedSymbol}
-          onChange={(e) => setSelectedSymbol(e.target.value)}
+        <input
+          id="symbol-search"
+          type="text"
+          value={search}
+          onChange={e => {
+            setSearch(e.target.value);
+            setShowList(true);
+          }}
+          onFocus={() => setShowList(true)}
           className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-2 border-green-500 focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm rounded-md"
-        >
-          {symbols.map((symbol) => (
-            <option key={symbol} value={symbol}>
-              {symbol}
-            </option>
-          ))}
-        </select>
+          placeholder="Type to search..."
+        />
+        {showList && (
+          <ul className="absolute z-10 bg-white border border-gray-200 w-full max-h-48 overflow-y-auto rounded shadow mt-1">
+            {symbols.filter(s => s.toLowerCase().includes(search.toLowerCase())).length === 0 ? (
+              <li className="px-4 py-2 text-gray-400">No results</li>
+            ) : (
+              symbols.filter(s => s.toLowerCase().includes(search.toLowerCase())).map(symbol => (
+                <li
+                  key={symbol}
+                  className={`px-4 py-2 cursor-pointer hover:bg-green-100 ${symbol === selectedSymbol ? 'bg-green-50 font-semibold' : ''}`}
+                  onClick={() => {
+                    setSelectedSymbol(symbol);
+                    setSearch(symbol);
+                    setShowList(false);
+                  }}
+                >
+                  {symbol}
+                </li>
+              ))
+            )}
+          </ul>
+        )}
       </div>
 
       {/* Signal Card */}

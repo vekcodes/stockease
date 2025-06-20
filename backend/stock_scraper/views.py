@@ -202,24 +202,21 @@ def ma_crossover_strategy(request, symbol):
         df[f'{strategy_key}_signal'] = 0
         short_ma = strategy['short_ma']
         long_ma = strategy['long_ma']
-        
-        # Generate signals based on crossover and price movement
         for i in range(1, len(df)):
             if pd.notna(df[short_ma].iloc[i]) and pd.notna(df[long_ma].iloc[i]):
-                # Calculate price change
-                price_change = df['close'].iloc[i] - df['close'].iloc[i-1]
-                
-                # Buy signal: short MA crosses above long MA AND price is moving up
-                if (df[short_ma].iloc[i-1] <= df[long_ma].iloc[i-1]) and \
-                   (df[short_ma].iloc[i] > df[long_ma].iloc[i]) and \
-                   (price_change > 0):
+                prev_short = df[short_ma].iloc[i-1]
+                prev_long = df[long_ma].iloc[i-1]
+                curr_short = df[short_ma].iloc[i]
+                curr_long = df[long_ma].iloc[i]
+                # Buy: short MA crosses above long MA from below
+                if prev_short <= prev_long and curr_short > curr_long:
                     df[f'{strategy_key}_signal'].iloc[i] = 1
-                
-                # Sell signal: short MA crosses below long MA AND price is moving down
-                elif (df[short_ma].iloc[i-1] >= df[long_ma].iloc[i-1]) and \
-                     (df[short_ma].iloc[i] < df[long_ma].iloc[i]) and \
-                     (price_change < 0):
+                # Sell: short MA crosses below long MA from above
+                elif prev_short >= prev_long and curr_short < curr_long:
                     df[f'{strategy_key}_signal'].iloc[i] = -1
+                # Neutral: both MAs are parallel (equal)
+                elif curr_short == curr_long:
+                    df[f'{strategy_key}_signal'].iloc[i] = 0
 
     # Step 5: Prepare result - return more historical data for better signal analysis
     # For Golden Cross (200 MA), we need at least 200 days of data

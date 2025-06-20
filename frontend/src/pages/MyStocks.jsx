@@ -17,6 +17,8 @@ const MyStocks = () => {
   const [sellPrice, setSellPrice] = useState("");
   const [sellDate, setSellDate] = useState("");
   const [selectedInvestment, setSelectedInvestment] = useState(null);
+  const [search, setSearch] = useState("");
+  const [showList, setShowList] = useState(false);
 
   useEffect(() => {
     fetchInvestments();
@@ -149,21 +151,42 @@ const MyStocks = () => {
       <div className="bg-white p-6 rounded-lg shadow-md mb-8">
         <h2 className="text-xl font-semibold mb-4">Add New Stock</h2>
         <form onSubmit={handleAddInvestment} className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          <div>
-            <Label htmlFor="symbol">Stock Symbol</Label>
-            <select
-              id="symbol"
-              value={selectedSymbol}
-              onChange={(e) => setSelectedSymbol(e.target.value)}
+          <div className="relative w-full">
+            <Label htmlFor="symbol-search">Stock Symbol</Label>
+            <input
+              id="symbol-search"
+              type="text"
+              value={search}
+              onChange={e => {
+                setSearch(e.target.value);
+                setShowList(true);
+              }}
+              onFocus={() => setShowList(true)}
               className="w-full p-2 border rounded-md mt-1"
-            >
-              <option value="">Select a symbol</option>
-              {symbols.map((symbol) => (
-                <option key={symbol} value={symbol}>
-                  {symbol}
-                </option>
-              ))}
-            </select>
+              placeholder="Type to search..."
+              autoComplete="off"
+            />
+            {showList && (
+              <ul className="absolute left-0 right-0 z-10 bg-white border border-gray-200 max-h-48 overflow-y-auto rounded shadow mt-1 w-full">
+                {symbols.filter(s => s.toLowerCase().includes(search.toLowerCase())).length === 0 ? (
+                  <li className="px-4 py-2 text-gray-400">No results</li>
+                ) : (
+                  symbols.filter(s => s.toLowerCase().includes(search.toLowerCase())).map(symbol => (
+                    <li
+                      key={symbol}
+                      className={`px-4 py-2 cursor-pointer hover:bg-green-100 ${symbol === selectedSymbol ? 'bg-green-50 font-semibold' : ''}`}
+                      onClick={() => {
+                        setSelectedSymbol(symbol);
+                        setSearch(symbol);
+                        setShowList(false);
+                      }}
+                    >
+                      {symbol}
+                    </li>
+                  ))
+                )}
+              </ul>
+            )}
           </div>
           <div>
             <Label htmlFor="buyPrice">Buy Price</Label>

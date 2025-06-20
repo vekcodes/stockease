@@ -71,10 +71,7 @@ const data = {
           title: "MA Crossover",
           url: "/ma-crossover",
         },
-        {
-          title: "Quantum",
-          url: "#",
-        },
+        
       ],
     },
     {
@@ -94,18 +91,8 @@ const data = {
     },
     {
       title: "Alerts",
-      url: "#",
+      url: "/alert",
       icon: Siren,
-      items: [
-        {
-          title: "Buy",
-          url: "#",
-        },
-        {
-          title: "Sell",
-          url: "#",
-        },
-      ],
     },
   ],
   // projects: [
