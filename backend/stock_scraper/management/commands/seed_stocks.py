@@ -7,7 +7,7 @@ class Command(BaseCommand):
     help = 'Seed stock OHLC data from CSV files'
 
     def handle(self, *args, **kwargs):
-        folder_path = 'D:/1Stockease/backend/stock_scraper/stocks'  # <- adjust this to your real directory
+        folder_path = 'E:/1Stockease/backend/stock_scraper/stocks'
 
         rows = []
 
