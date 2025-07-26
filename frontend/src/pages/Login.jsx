@@ -10,6 +10,7 @@ import API from "@/lib/axios";
 const Login = () => {
     const [credentials, setCredentials] = useState({ username: "", password: "" });
     const [error, setError] = useState("");
+    const [isAdmin, setIsAdmin] = useState(false);
     const navigate = useNavigate();
 
     const handleChange = (e) => {
@@ -19,9 +20,16 @@ const Login = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
-            const res = await API.post("/api/login/", credentials);
+            const endpoint = isAdmin ? "/api/admin/login/" : "/api/login/";
+            const res = await API.post(endpoint, credentials);
             localStorage.setItem("access_token", res.data.access);
-            navigate("/dashboard");
+            localStorage.setItem("is_admin", res.data.is_admin || false);
+            
+            if (isAdmin) {
+                navigate("/admin-dashboard");
+            } else {
+                navigate("/dashboard");
+            }
         } catch (err) {
             setError("Invalid credentials.");
         }
@@ -118,7 +126,15 @@ const Login = () => {
             {/* Login Form Card */}
             <Card className="w-[90%] max-w-sm bg-white/90 backdrop-blur-md shadow-xl">
                 <CardHeader>
-                    <CardTitle>Login</CardTitle>
+                    <CardTitle className="flex items-center justify-between">
+                        <span>{isAdmin ? "Admin Login" : "Login"}</span>
+                        <button
+                            onClick={() => setIsAdmin(!isAdmin)}
+                            className="text-sm text-blue-500 hover:text-blue-700"
+                        >
+                            {isAdmin ? "User Login" : "Admin Login"}
+                        </button>
+                    </CardTitle>
                 </CardHeader>
                 <CardContent>
                     <form className="space-y-4" onSubmit={handleSubmit}>
@@ -146,15 +162,19 @@ const Login = () => {
                         </div>
                         {error && <p className="text-sm text-red-500">{error}</p>}
                         <Button className="w-full" type="submit">
-                            Login
+                            {isAdmin ? "Admin Login" : "Login"}
                         </Button>
                     </form>
                 </CardContent>
                 <CardFooter className="text-center justify-center text-sm">
-                    Don't Have an account?&nbsp;
-                    <Link to={"/register"} className="text-blue-500">
-                        Register
-                    </Link>
+                    {!isAdmin && (
+                        <>
+                            Don't Have an account?&nbsp;
+                            <Link to={"/register"} className="text-blue-500">
+                                Register
+                            </Link>
+                        </>
+                    )}
                 </CardFooter>
             </Card>
         </div>
